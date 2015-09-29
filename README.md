@@ -3,8 +3,8 @@ py-kms is a port of node-kms by [markedsword](http://forums.mydigitallife.info/m
 
 # Features
 - Responds to V4, V5, and V6 KMS requests.
-- Supports activating Windows 7/8/8.1/2008R2/2012/2012R2 and Office 2010/2013.
-- It's written in Python.
+- Supports activating Windows 7/8/8.1/10/2008R2/2012/2012R2 and Office 2010/2013.
+- It's written in Python2.
 
 # Dependencies
 - Python 2.7.x or Python 2.6.x with the "argparse" module installed.

@@ -4,67 +4,15 @@ import time
 from kmsBase import kmsBase
 from structure import Structure
 
-# Rijndael SBox
 from aes import AES
-subTable = AES.sbox
 
-# Complex
-from tablecomplex import tableComplex
-
-# Intern Hash
-def hasher(hashBuffer):
-	addRoundKey(hashBuffer, 0)
-
-	for i in range(1,6):
-		shiftRows(hashBuffer)
-		mixColumns(hashBuffer)
-		subbytes(hashBuffer)
-		shiftRows(hashBuffer)
-		mixColumns(hashBuffer)
-		addRoundKey(hashBuffer, i << 12)
-
-	shiftRows(hashBuffer)
-
-# AddRoundKey (Complex)
-def addRoundKey(hash, round):
-	for i in range(0,16):
-		hash[i] = tableComplex[hash[i] ^ round ^ (i << 8)]
+# v4 AES Key
+key = bytearray([0x05, 0x3D, 0x83, 0x07, 0xF9, 0xE5, 0xF0, 0x88, 0xEB, 0x5E, 0xA6, 0x68, 0x6C, 0xF0, 0x37, 0xC7, 0xE4, 0xEF, 0xD2, 0xD6])
 
 # Xor Buffer
-def xorBuffer(source, offset, destination):
-	for i in range(0,16):
+def xorBuffer(source, offset, destination, size):
+	for i in range(0, size):
 		destination[i] ^= source[i + offset]
-
-# Rijndael SBox
-def subbytes(pbytes):
-	for i in range(0,16):
-		pbytes[i] = subTable[pbytes[i]]
-
-# Rijndael ShiftRows
-def shiftRows(pbytes):
-	bIn = pbytes[0:16]
-	for i in range(0,16):
-		pbytes[i] = bIn[(i + ((i & 3) << 2)) & 0xf]
-
-# Rijndael MixColumns
-def mixColumns(pbytes):
-	bIn = pbytes[0:16]
-	for i in range(0,16,4):
-		pbytes[i] = (mulx2(bIn[i]) ^ mulx3(bIn[i + 1]) ^ bIn[i + 2] ^ bIn[i + 3]) & 0xff
-		pbytes[i + 1] = (bIn[i] ^ mulx2(bIn[i + 1]) ^ mulx3(bIn[i + 2]) ^ bIn[i + 3]) & 0xff
-		pbytes[i + 2] = (bIn[i] ^ bIn[i + 1] ^ mulx2(bIn[i + 2]) ^ mulx3(bIn[i + 3])) & 0xff
-		pbytes[i + 3] = (mulx3(bIn[i]) ^ bIn[i + 1] ^ bIn[i + 2] ^ mulx2(bIn[i + 3])) & 0xff
-
-# Galois Field MUL x 2
-def mulx2(bIn):
-	bOut = (bIn << 1)
-	if ((bIn & 0x80) != 0x00):
-		bOut ^= 0x1B
-	return bOut
-
-# Galois Field MUL x 3
-def mulx3(bIn):
-	return (mulx2(bIn) ^ bIn)
 
 class kmsRequestV4(kmsBase):
 	class RequestV4(Structure):
@@ -99,6 +47,18 @@ class kmsRequestV4(kmsBase):
 		time.sleep(1) # request sent back too quick for Windows 2008 R2, slow it down.
 
 	def generateHash(self, message):
+		"""
+		The KMS v4 hash is a variant of CMAC-AES-128. There are two key differences:
+		* The 'AES' used is modified in particular ways:
+		  * The basic algorithm is Rjindael with a conceptual 160bit key and 128bit blocks.
+		    This isn't part of the AES standard, but it works the way you'd expect.
+		    Accordingly, the algorithm uses 11 rounds and a 192 byte expanded key.
+		* The trailing block is not XORed with a generated subkey, as defined in CMAC.
+		  This is probably because the subkey generation algorithm is only defined for
+		  situations where block and key size are the same.
+		"""
+		aes = AES()
+
 		messageSize = len(message)
 		lastBlock = bytearray(16) 
 		hashBuffer = bytearray(16)
@@ -110,9 +70,9 @@ class kmsRequestV4(kmsBase):
 		k = messageSize & 0xf
 
 		# Hash
-		for i in range(0,j):
-			xorBuffer(message, i << 4, hashBuffer)
-			hasher(hashBuffer)
+		for i in range(0, j):
+			xorBuffer(message, i << 4, hashBuffer, 16)
+			hashBuffer = bytearray(aes.encrypt(hashBuffer, key, len(key)))
 
 		# Bit Padding
 		ii = 0
@@ -121,8 +81,8 @@ class kmsRequestV4(kmsBase):
 			ii += 1
 		lastBlock[k] = 0x80
 
-		xorBuffer(lastBlock, 0, hashBuffer)
-		hasher(hashBuffer)
+		xorBuffer(lastBlock, 0, hashBuffer, 16)
+		hashBuffer = bytearray(aes.encrypt(hashBuffer, key, len(key)))
 
 		return str(hashBuffer)
 
@@ -142,4 +102,20 @@ class kmsRequestV4(kmsBase):
 	def getResponse(self):
 		return self.responseData
 
+	def generateRequest(self, requestBase):
+		hash = str(self.generateHash(bytearray(str(requestBase))))
 
+		bodyLength = len(requestBase) + len(hash)
+
+		request = kmsRequestV4.RequestV4()
+		request['bodyLength1'] = bodyLength
+		request['bodyLength2'] = bodyLength
+		request['request'] = requestBase
+		request['hash'] = hash
+		request['padding'] = self.getResponsePadding(bodyLength)
+
+		if self.config['debug']:
+			print "Request V4 Data:", request.dump()
+			print "Request V4:", binascii.b2a_hex(str(request))
+
+		return request

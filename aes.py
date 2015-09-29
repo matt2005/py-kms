@@ -342,6 +342,8 @@ class AES(object):
         if size == self.keySize["SIZE_128"]: nbrRounds = 10
         elif size == self.keySize["SIZE_192"]: nbrRounds = 12
         elif size == self.keySize["SIZE_256"]: nbrRounds = 14
+        # The KMS v4 parameters
+        elif size == 20: nbrRounds = 11
         else: return None
 
         # the expanded keySize
